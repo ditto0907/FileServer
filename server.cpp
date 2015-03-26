@@ -17,6 +17,9 @@
 #include <sys/wait.h> 
 #include <sys/time.h> 
 
+#include <fcntl.h>
+#include <dirent.h>
+
 using namespace std;
 
 
@@ -45,9 +48,9 @@ class cFile
 public:
 	//cFile();
 	//~cFile();
-	
-	int ReadFile(char *filename,char* &outbuff);
-	int WriteFile();
+	int OpenFile(char *filename);
+	int ReadFile(int fd,char* &outbuff,int readsize);
+	int WriteFile(int fd,char* &inbuff,int writesize);
 };
 
 class cSocket
@@ -66,7 +69,8 @@ public:
 
 	int SocketInit();
 	int ReceiveCommand();
-	int SendFile(char *sendbuffer);
+	int SendFile(char *filename);
+	int RecvFile(char* filename);
 	int Close();
 };
 
@@ -77,7 +81,7 @@ int main()
 
 	cSocket myserver;
 	cParse  myparse;
-	cFile 	myfile;
+	//cFile 	myfile;
 
 	char *sendbuffer = (char*)malloc(sizeof(char)*102400);
 	
@@ -94,12 +98,7 @@ int main()
 		}
 		if(myparse.method == "get")
 		{
-			if(myfile.ReadFile(myparse.filename,sendbuffer))
-			{
-				printf("Read Succeed\n");
-			}
-
-			myserver.SendFile(sendbuffer);
+			myserver.SendFile(myparse.filename);
 		}
 		else if(myparse.method == "get")
 		{
@@ -153,11 +152,46 @@ int cParse::GetCommand(char* commandline)
 	return 1;
 }
 
-int cFile::ReadFile(char *filename,char* &outbuff)
+int cFile::OpenFile(char *filename)
+{
+	int fd;
+	int error = 0;
+	try
+	{
+		if((fd = open(filename,O_RDONLY))==-1)
+		{
+			error = fd;
+			throw error;
+		}
+	}
+	catch(int &error)
+	{
+		switch(error)
+		{
+			case -1:
+				printf("OpenFile failed\n");
+				printf("%s\n", filename);
+				break;
+			default:
+				break;
+		}
+	}
+	return fd;
+}
+
+int cFile::ReadFile(int fd,char* &outbuff,int readsize)
 {
 	// wait .....
-	outbuff = (char*)"This is my test file wawaawawawawawawawawaw\n";
-	return 1;
+	//outbuff = (char*)"This is my test file wawaawawawawawawawawaw\n";
+	int nbyte;
+	nbyte = read(fd, outbuff, readsize);
+	return nbyte;
+}
+
+int cFile::WriteFile(int fd,char* &inbuff,int writesize)
+{	
+	
+
 }
 
 int cSocket::SocketInit()
@@ -209,21 +243,31 @@ int cSocket::ReceiveCommand()
 
 }
 
-int cSocket::SendFile(char *sendbuffer)
+int cSocket::SendFile(char *filename)
 {
 	//char *outbuff = (char*)malloc(sizeof(char)*4096); 
 	//outbuff = (char *)"This is my test file\n";
+	cFile myfile;
+	int fd,nbyte = 0;;
+	char* sendbuf = (char*)malloc(sizeof(char)*4096);
 
-	int ret = send(serverSocket,sendbuffer,strlen(sendbuffer)+1,0);
-	if(ret)
-	{
-		printf("Send success!!\n");
-		printf("Send buffer:\n%s\n",sendbuffer);
-	}
-	else
-	{
-		printf("Send failed\n");
-		return -1;
+	if((fd = myfile.OpenFile(filename))>0)
+	{	
+		while((nbyte = myfile.ReadFile(fd,sendbuf,4096))>0)
+		{
+			int ret = send(serverSocket,sendbuf,strlen(sendbuf),0);	
+			if(ret)
+			{
+				printf("Send success!!\n");
+				//printf("Send buffer:\n%s\n",sendbuf);
+			}
+			else
+			{
+				printf("Send failed\n");
+				return -1;
+			}
+		}
+
 	}
 	return 1;
 }
