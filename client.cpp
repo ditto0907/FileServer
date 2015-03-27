@@ -24,9 +24,6 @@ using namespace std;
 
 
 
-#define IPSTR "127.0.0.1" 
-#define PORT 8091 
-
 class cParse
 {
 public:
@@ -43,16 +40,16 @@ public:
 	};
 	~cParse()
 	{
-		printf("free method\n");
+		//printf("free method\n");
 		free(method);
 		
-		printf("free filename\n");
+		//printf("free filename\n");
 		free(filename);
 		
-		printf("free ipaddr\n");
+		//printf("free ipaddr\n");
 		free(ipaddr);
 
-		printf("free portstr\n");
+		//printf("free portstr\n");
 		free(portstr);
 	};
 
@@ -64,6 +61,7 @@ public:
 	int port;
 	
 	int GetCommand(char* commandline);
+	int GetPort(char *portstr);
 };
 
 class cFile
@@ -72,8 +70,10 @@ public:
 	//cFile();
 	//~cFile();
 	int OpenFile(char *filename);
+	int CreatFile(char *filename);
 	int ReadFile(int fd,char* &outbuff,int readsize);
 	int WriteFile(int fd,char* &inbuff,int writesize);
+	int CloseFile(int fd);
 
 };
 
@@ -90,16 +90,15 @@ public:
 		free(serverip);
 	};
 
-	int clientSocket;
+	
 	int serverport;
 	char* serverip;
 
-	//int listenSocket;
+	int mySocket;
+	int listenSocket;
 	struct sockaddr_in serveraddr;
-
 	char recvCommand[100];
 
-	//char sendBuf[1024000];
 
 	int SocketInit();
 	int ReceiveCommand();
@@ -113,17 +112,49 @@ public:
 int main()
 {
 	cParse myparse;
-	cSocket mysocket;
+	cSocket myclient;
 	cFile myfile;
 
-	char *commandline = (char*)"get -h 127.0.0.1 -p 8091 test.txt";
-	myparse.GetCommand(commandline);
-	//mysocket.serverip = myparse.ipaddr;
-	//mysocket.serverport = 8090;
+	char *commandline = (char*)malloc(sizeof(char)*40);
+	
+	while(1)
+	{
+		cin.getline(commandline,40);
 
-	//mysocket.SocketInit();
+		int ret = 0;
 
+		if((ret = myparse.GetCommand(commandline))>0)
+		{	
+			myclient.serverip = myparse.ipaddr;
+			myclient.serverport = myparse.port;
+			myclient.SocketInit();
+			myclient.SendCommand(commandline);
 
+			if(strstr(myparse.method,"get"))
+			{
+				myclient.RecvFile(myparse.filename);
+				printf("Downloaded\n");
+			}
+			else if(strstr(myparse.method,"put"))
+			{
+				myclient.SendFile(myparse.filename);
+				printf("Uploaded\n");
+			}
+			else
+			{
+				printf("Error\n");
+				close(myclient.mySocket);
+			}
+		}
+		else
+		{
+			cout<<ret<<endl;
+		}
+
+		
+	}
+
+	myclient.Close();
 	return 0;
 }
 
@@ -160,7 +191,7 @@ int cParse::GetCommand(char* commandline)
 			end++;
 		end++;
 		strcpy(ipaddr,p);
-		*(ipaddr+(end-p)) = '\0';
+		*(ipaddr+(end-p-1)) = '\0';
 	}
 	else
 	{
@@ -176,18 +207,34 @@ int cParse::GetCommand(char* commandline)
 			end++;
 		end++;
 		strcpy(portstr,p);
-		*(portstr+(end-p)) = '\0';
+		*(portstr+(end-p-1)) = '\0';
 		strcpy(filename,end);
 	}
 	else
 	{
 		return -3;
 	}
-	printf("%s\n",method);
-	printf("%s\n",filename);
-	printf("%s\n",ipaddr);
-	printf("%s\n",portstr);
 
+	GetPort(portstr);
+
+	//printf("%s-\n",method);
+	//printf("%s-\n",filename);
+	//printf("%s-\n",ipaddr);
+	//printf("%s-\n",portstr);
+	//printf("%d-\n",port);
+
+	return 1;
+}
+
+int cParse::GetPort(char *portstr)
+{
+	int len = strlen(portstr);
+	port = 0;
+	for(int i = 0;i<len;i++)
+	{
+		port = port*10+(*(portstr+i)-'0');
+	}
+	//printf("%d,%d\n",len,port);
 	return 1;
 }
 
@@ -197,10 +244,15 @@ int cFile::OpenFile(char *filename)
 	int error = 0;
 	try
 	{
-		if((fd = open(filename,O_RDONLY))==-1)
+		fd = open(filename,O_RDONLY);
+		if(fd<0)
 		{
 			error = fd;
 			throw error;
+		}
+		else
+		{
+			return fd;
 		}
 	}
 	catch(int &error)
@@ -209,13 +261,46 @@ int cFile::OpenFile(char *filename)
 		{
 			case -1:
 				printf("OpenFile failed\n");
-				printf("%s\n", filename);
+				printf("%s\n,%d", filename,fd);
+				return error;
 				break;
 			default:
 				break;
 		}
 	}
 	return fd;
+}
+
+int cFile::CreatFile(char *filename)
+{
+	int fd=0;
+	int error = 0;
+
+	//fd = open(filename,O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+	try
+	{
+		fd = open(filename,O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+		if(fd<0)
+		{
+			error = fd;
+			throw error;
+		}
+		else
+			return fd;
+	}
+	catch(int &error)
+	{
+		switch(error)
+		{
+			case -1:
+				printf("CreatFile failed\n");
+				printf("%s\n", filename);
+				break;
+			default:
+				break;
+		}
+	}
+	return fd;	
 }
 
 int cFile::ReadFile(int fd,char* &outbuff,int readsize)
@@ -229,8 +314,15 @@ int cFile::ReadFile(int fd,char* &outbuff,int readsize)
 
 int cFile::WriteFile(int fd,char* &inbuff,int writesize)
 {	
-	
+	int nbyte;
+	nbyte = write(fd,inbuff,writesize);
+	return nbyte;	
+}
 
+int cFile::CloseFile(int fd)
+{
+	
+	close(fd);
 }
 
 int cSocket::SocketInit()
@@ -240,7 +332,7 @@ int cSocket::SocketInit()
     serveraddr.sin_family = AF_INET; 
    	serveraddr.sin_port = htons(serverport); 
 
-	if ((clientSocket= socket(AF_INET, SOCK_STREAM, 0)) < 0 ) 
+	if ((mySocket= socket(AF_INET, SOCK_STREAM, 0)) < 0 ) 
 	{ 
 		printf("socket error!\n"); 
 		return -1;
@@ -250,7 +342,7 @@ int cSocket::SocketInit()
 		printf("inet_pton error!\n"); 
 		return -2; 
 	}
-	if (connect(clientSocket, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) 
+	if (connect(mySocket, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) 
 	{     
 	    printf("connect error!\n"); 
 	    return -3; 
@@ -272,12 +364,22 @@ int cSocket::ReceiveCommand()
 	printf("Accept command success!!\n");
 	printf("%s\n", recvCommand);
 	return 1;*/
-
 }
 
 int cSocket::SendCommand(char* commandline)
 {
-
+	int ret = send(mySocket,commandline,strlen(commandline),0);
+	if (ret < 0) 
+	{ 
+		printf("send error!!"); 
+		return 0; 
+	}
+	else
+	{ 
+		printf("send command success ,total send %d \n", ret);
+		//printf("%s\n",commandline); 
+	}
+	return 1;
 }
 
 int cSocket::SendFile(char *filename)
@@ -286,13 +388,13 @@ int cSocket::SendFile(char *filename)
 	//outbuff = (char *)"This is my test file\n";
 	cFile myfile;
 	int fd,nbyte = 0;;
-	char* sendbuf = (char*)malloc(sizeof(char)*1024);
+	char* sendbuf = (char*)malloc(sizeof(char)*4096);
 
 	if((fd = myfile.OpenFile(filename))>0)
 	{	
-		while((nbyte = myfile.ReadFile(fd,sendbuf,1024))>0)
+		while((nbyte = myfile.ReadFile(fd,sendbuf,4096))>0)
 		{
-			int ret = send(clientSocket,sendbuf,strlen(sendbuf),0);	
+			int ret = send(mySocket,sendbuf,strlen(sendbuf),0);	
 			if(ret)
 			{
 				printf("Send success!!\n");
@@ -306,28 +408,54 @@ int cSocket::SendFile(char *filename)
 		}
 
 	}
+	else
+	{
+		
+		close(mySocket);
+		myfile.CloseFile(fd);
+		free(sendbuf);
+		return -1;
+	}
+	close(mySocket);
+	myfile.CloseFile(fd);
 	free(sendbuf);
 	return 1;
 }
 
 int cSocket::RecvFile(char* filename)
 {
-	int i ;
-	char *recvBuf = (char*)malloc(sizeof(char)*4096);
-	while((i = recv(clientSocket, recvBuf, 4096,0))>0)
+	cFile myfile;
+	int fd,nbyte = 0;
+	char *recvbuf = (char*)malloc(sizeof(char)*4096);
+
+	//fd = open(filename,O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+
+	if((fd = myfile.CreatFile(filename))>0)
 	{
-
-		printf("Recv success!!\n");
-		printf("%s\n",recvBuf);
+		nbyte = recv(mySocket,recvbuf,4096,0);
+		while(nbyte>0)
+		{
+			int ret = myfile.WriteFile(fd,recvbuf,nbyte);
+			nbyte = recv(mySocket,recvbuf,4096,0);
+			printf("Recv success!!%d\n",ret);
+		}
 	}
-
-	free(recvBuf);
+	else
+	{
+		close(mySocket);
+		myfile.CloseFile(fd);
+		free(recvbuf);
+		printf("Recv failed %d!!\n",fd);
+		return -1;
+	}
+	close(mySocket);
+	myfile.CloseFile(fd);
+	free(recvbuf);
+	printf("done\n");
 	return	1;
-
 }
-
 int cSocket::Close()
 {
-	close(clientSocket);
+	close(mySocket);
 	return 1;
 }

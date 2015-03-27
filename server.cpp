@@ -33,8 +33,8 @@ public:
 	};
 	~cParse()
 	{
-		delete(method);
-		delete(filename);
+		free(method);
+		free(filename);
 	};
 
 	char* method;
@@ -49,8 +49,10 @@ public:
 	//cFile();
 	//~cFile();
 	int OpenFile(char *filename);
+	int CreatFile(char *filename);
 	int ReadFile(int fd,char* &outbuff,int readsize);
 	int WriteFile(int fd,char* &inbuff,int writesize);
+	int CloseFile(int fd);
 };
 
 class cSocket
@@ -59,10 +61,9 @@ public:
 	//cSocket();
 	//~cSocket();
 
-	int serverSocket;
+	int mySocket;
 	int listenSocket;
 	struct sockaddr_in serveraddr;
-
 	char recvCommand[100];
 
 	//char sendBuf[1024000];
@@ -96,15 +97,22 @@ int main()
 		{
 			printf("Parse Succeed\n");
 		}
-		if(myparse.method == "get")
+		if(strstr(myparse.method,"get"))
 		{
 			myserver.SendFile(myparse.filename);
-		}
-		else if(myparse.method == "get")
-		{
-		
 
 		}
+		else if(strstr(myparse.method,"put"))
+		{
+			myserver.RecvFile(myparse.filename);
+		
+		}
+		else
+		{
+			printf("Error\n");
+			close(myserver.mySocket);
+		}
+
 	}
 	myserver.Close();
 
@@ -117,18 +125,21 @@ int cParse::GetCommand(char* commandline)
 	char *p = strstr(commandline,"put");
 	if(p)
 	{
-		method = (char*)"put";
+		//method = (char*)"put";
+		strcpy(method,"put");
 	}
 	else
 	{
 		p = strstr(commandline,"get");
 		if(p)
 		{
-			method = (char*)"get";
+			//method = (char*)"get";
+			strcpy(method,"get");
 		}
 		else
 		{
-			method = (char*)"error";
+			//method = (char*)"error";
+			strcpy(method,"error");
 			return -1;
 		}
 	}
@@ -146,8 +157,8 @@ int cParse::GetCommand(char* commandline)
 	{
 		return -2;
 	}
-	printf("%s\n",method);
-	printf("%s\n",filename);
+	//printf("%s-\n",method);
+	//printf("%s-\n",filename);
 
 	return 1;
 }
@@ -158,10 +169,15 @@ int cFile::OpenFile(char *filename)
 	int error = 0;
 	try
 	{
-		if((fd = open(filename,O_RDONLY))==-1)
+		fd = open(filename,O_RDONLY);
+		if(fd<0)
 		{
 			error = fd;
 			throw error;
+		}
+		else
+		{
+			return fd;
 		}
 	}
 	catch(int &error)
@@ -170,13 +186,46 @@ int cFile::OpenFile(char *filename)
 		{
 			case -1:
 				printf("OpenFile failed\n");
-				printf("%s\n", filename);
+				printf("%s,%d\n", filename,fd);
+				return error;
 				break;
 			default:
 				break;
 		}
 	}
 	return fd;
+}
+
+int cFile::CreatFile(char *filename)
+{
+	int fd=0;
+	int error = 0;
+
+	//fd = open(filename,O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+	try
+	{
+		fd = open(filename,O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+		if(fd<0)
+		{
+			error = fd;
+			throw error;
+		}
+		else
+			return fd;
+	}
+	catch(int &error)
+	{
+		switch(error)
+		{
+			case -1:
+				printf("CreatFile failed\n");
+				printf("%s\n", filename);
+				break;
+			default:
+				break;
+		}
+	}
+	return fd;	
 }
 
 int cFile::ReadFile(int fd,char* &outbuff,int readsize)
@@ -190,8 +239,15 @@ int cFile::ReadFile(int fd,char* &outbuff,int readsize)
 
 int cFile::WriteFile(int fd,char* &inbuff,int writesize)
 {	
-	
+	int nbyte;
+	nbyte = write(fd,inbuff,writesize);
+	return nbyte;	
+}
 
+int cFile::CloseFile(int fd)
+{
+	
+	close(fd);
 }
 
 int cSocket::SocketInit()
@@ -223,7 +279,6 @@ int cSocket::SocketInit()
 
 	printf("======waiting for client's request======\n");
 	return 1;
-	
 }
 
 int cSocket::ReceiveCommand()
@@ -233,14 +288,13 @@ int cSocket::ReceiveCommand()
 
 	socklen_t len = sizeof(serveraddr);
 
-	serverSocket = accept(listenSocket,(struct sockaddr*)&serveraddr,&len); 
+	mySocket = accept(listenSocket,(struct sockaddr*)&serveraddr,&len); 
 
-	int n = recv(serverSocket,recvCommand,1024,0);
+	int n = recv(mySocket,recvCommand,1024,0);
 
 	printf("Accept command success!!\n");
 	printf("%s\n", recvCommand);
 	return 1;
-
 }
 
 int cSocket::SendFile(char *filename)
@@ -255,7 +309,7 @@ int cSocket::SendFile(char *filename)
 	{	
 		while((nbyte = myfile.ReadFile(fd,sendbuf,4096))>0)
 		{
-			int ret = send(serverSocket,sendbuf,strlen(sendbuf),0);	
+			int ret = send(mySocket,sendbuf,strlen(sendbuf),0);	
 			if(ret)
 			{
 				printf("Send success!!\n");
@@ -269,13 +323,56 @@ int cSocket::SendFile(char *filename)
 		}
 
 	}
+	else
+	{
+		close(mySocket);
+		myfile.CloseFile(fd);
+		free(sendbuf);
+		return -1;
+	}
+	close(mySocket);
+	myfile.CloseFile(fd);
+	free(sendbuf);
 	return 1;
+}
+
+int cSocket::RecvFile(char* filename)
+{
+	cFile myfile;
+	int fd,nbyte = 0;
+	char *recvbuf = (char*)malloc(sizeof(char)*4096);
+
+	//fd = open(filename,O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+
+	if((fd = myfile.CreatFile(filename))>0)
+	{
+		nbyte = recv(mySocket,recvbuf,4096,0);
+		while(nbyte>0)
+		{
+			int ret = myfile.WriteFile(fd,recvbuf,nbyte);
+			nbyte = recv(mySocket,recvbuf,4096,0);
+			printf("Recv success!!%d\n",ret);
+		}
+	}
+	else
+	{
+		close(mySocket);
+		myfile.CloseFile(fd);
+		free(recvbuf);
+		printf("Recv failed %d!!\n",fd);
+		return -1;
+	}
+	close(mySocket);
+	myfile.CloseFile(fd);
+	free(recvbuf);
+	printf("done\n");
+	return	1;
 }
 
 int cSocket::Close()
 {
 	close(listenSocket);
-	close(serverSocket);
+	close(mySocket);
 	return 1;
 }
 
